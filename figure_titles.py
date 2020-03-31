@@ -11,15 +11,17 @@ projects = all_projects['Hearing order'].unique()
 
 # regex expressions needed for the extractions
 empty_line = r'<\/p>\s*<p ?\/?>'
-whitespace = r'\s+' # all white space
-punctuation = r'[^\w\s]' # punctuation (not letter or number)
+whitespace = r'\s+'  # all white space
+punctuation = r'[^\w\s]'  # punctuation (not letter or number)
 figure = r'(?im)(^Figure .*?\n?.*?)\.{2,}(.*)'
 table = r'(?im)(^Table (?!of contents?).*?\n?.*?)\.{2,}(.*)'
 save_dir = 'F:/Environmental Baseline Data/Version 4 - Final/Saved2/'
-load_pickles = 1 # if document pickles need to be loaded to projects (only need to do once)
+load_pickles = 1  # if document pickles need to be loaded to projects (only need to do once)
 
 # function that takes ID of project, and finds locations of all the tables from that projects' TOC
 # saves result to save_dir folder
+
+
 def get_titles(project):
     df_figs = pd.read_csv(save_dir + 'all_figs.csv', encoding='utf-8-sig')
     df_figs = df_figs[df_figs['Project'] == project]  # filter out just current project
@@ -91,8 +93,10 @@ def get_titles(project):
                         text_clean = re.sub(whitespace, ' ', page.text)
                         text_clean = re.sub(punctuation, ' ', text_clean)
                         # if re.search(s1_rex, page.text) and re.search(s2_rex, re.sub(whitespace, ' ', page.text)):
-                        if re.search(word1_rex, page.text) and re.search(word2_rex, page.text) and re.search(s2_rex,
-                                                                                                             text_clean):
+                        if re.search(
+                                word1_rex, page.text) and re.search(
+                                word2_rex, page.text) and re.search(
+                                s2_rex, text_clean):
                             if (doc_id != toc_id) or (page_num != toc_page):
                                 if doc_id not in id_list:
                                     id_list.append(doc_id)
@@ -108,8 +112,10 @@ def get_titles(project):
                         text_clean = re.sub(whitespace, ' ', page.text)
                         text_clean = re.sub(punctuation, ' ', text_clean)
                         # if re.search(s1_rex, page.text) and re.search(s2_rex, re.sub(whitespace, ' ', page.text)):
-                        if re.search(word1_rex, page.text) and re.search(word2_rex, page.text) and re.search(s2_rex,
-                                                                                                             text_clean):
+                        if re.search(
+                                word1_rex, page.text) and re.search(
+                                word2_rex, page.text) and re.search(
+                                s2_rex, text_clean):
                             if (doc_id != toc_id) or (page_num != toc_page):
                                 if doc_id not in id_list:
                                     id_list.append(doc_id)
@@ -121,6 +127,7 @@ def get_titles(project):
             df_figs.loc[index, 'count'] = count
     df_figs.to_csv(save_dir + project + '-final_figs.csv', index=False, encoding='utf-8-sig')
     return True
+
 
 # assuming saved_dir has all the project csvs already, and has the all_tables file in it already
 # go through every table and find it in some document and record ID and real page num
