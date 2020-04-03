@@ -13,7 +13,7 @@ save_dir = '//luxor/data/branch/Environmental Baseline Data/Version 4 - Final/Sa
 
 # regex expressions needed for the extractions
 empty_line = r'<\/p>\s*<p ?\/?>'
-punctuation = r'[^\w\s]'  # punctuation (not letter or number)
+punctuation = r'[^\w\s]+'  # punctuation (not letter or number)
 figure = r'(?im)(^Figure .*?\n?.*?)\.{2,}(.*)'
 table = r'(?im)(^Table (?!of contents?).*?\n?.*?)\.{2,}(.*)'
 
