@@ -9,8 +9,8 @@ if __name__ == "__main__":
     all_projects = pd.read_excel(projects_path)
     projects = all_projects['Hearing order'].unique()
     # print(projects)
-    # projects = ['OH-002-2016'] # The biggest project
-    projects = ['OH-005-2011']  # A small project (for testing)
+    projects = ['OH-002-2016']  # The biggest project
+    # projects = ['OH-1-2008']  # A small project (for testing)
 
     # assuming saved_dir has all the project csvs already, and has the all_tables file in it already
     # go through every table and find it in some document and record ID and real page num

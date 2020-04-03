@@ -7,11 +7,8 @@ import traceback
 whitespace = r'\s+'  # all white space
 
 
-def iterator_function():
-    pass
-
-
-def table_checker(doc_text, doc_text_rotated, doc_id, toc_id, toc_page, s1_rex, s2_rex):
+def table_checker(args):
+    doc_text, doc_text_rotated, doc_id, toc_id, toc_page, s1_rex, s2_rex = args
     buf = StringIO()
     page_list = []
     with redirect_stdout(buf), redirect_stderr(buf):
@@ -37,7 +34,7 @@ def table_checker(doc_text, doc_text_rotated, doc_id, toc_id, toc_page, s1_rex, 
                     if (doc_id != toc_id) or (page_num != toc_page):
                         page_list.append(page_num)
             print(f"Success. Found data on {len(page_list)} pages.")
-            return True, buf.getvalue(), page_list
+            return True, buf.getvalue(), page_list, doc_id
         except Exception as e:
             traceback.print_tb(e.__traceback__)
-            return False, buf.getvalue(), page_list
+            return False, buf.getvalue(), page_list, doc_id

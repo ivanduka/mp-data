@@ -3,6 +3,8 @@ from io import StringIO
 from contextlib import redirect_stdout, redirect_stderr
 import re
 from bs4 import BeautifulSoup
+import time
+from multiprocessing import Pool
 
 from external_external_functions import whitespace, table_checker
 
@@ -44,6 +46,7 @@ def fig_checker(doc_text, doc_text_rotated, doc_id, toc_id, toc_page, word1_rex,
 # saves result to save_dir folder
 def get_titles_tables(project):
     print(f"Starting {project}")
+    start_time = time.time()
     df_tables = pd.read_csv(save_dir + 'all_tables.csv', encoding='utf-8-sig')
     df_tables = df_tables[df_tables['Project'] == project]  # filter out just current project
     df_tables['location_DataID'] = None
@@ -85,9 +88,10 @@ def get_titles_tables(project):
             doc_id = prev_id
             doc_text = df_project.loc[doc_id, 'Text']
             doc_text_rotated = df_project.loc[doc_id, 'Text_rotated']
-            success, output, page_list = table_checker(doc_text, doc_text_rotated, doc_id, toc_id, toc_page, s1_rex,
-                                                       s2_rex)
-            print(output)
+            arg = (doc_text, doc_text_rotated, doc_id, toc_id, toc_page, s1_rex, s2_rex)
+            success, output, page_list, doc_id = table_checker(arg)
+            if not success:
+                print(output)
             if len(page_list) > 0:
                 id_list = [doc_id]
                 count = len(page_list)
@@ -97,9 +101,10 @@ def get_titles_tables(project):
             doc_id = toc_id
             doc_text = df_project.loc[doc_id, 'Text']
             doc_text_rotated = df_project.loc[doc_id, 'Text_rotated']
-            success, output, page_list = table_checker(doc_text, doc_text_rotated, doc_id, toc_id, toc_page, s1_rex,
-                                                       s2_rex)
-            print(output)
+            arg = (doc_text, doc_text_rotated, doc_id, toc_id, toc_page, s1_rex, s2_rex)
+            success, output, page_list, doc_id = table_checker(arg)
+            if not success:
+                print(output)
             if len(page_list) > 0:
                 id_list = [doc_id]
                 count = len(page_list)
@@ -110,17 +115,34 @@ def get_titles_tables(project):
 
         # if fig still not found, go through all docs in this project and try to find the doc there
         if count == 0:
+            print("Starting multiprocessing. You will see the errors (if any) only when everything is finished...")
+            # Phase 1. Arguments preparation for processing
+            args = []
             for doc_id, doc in df_project.iterrows():
                 if (doc_id != toc_id) and (doc_id != prev_id):
                     doc_text = df_project.loc[doc_id, 'Text']
                     doc_text_rotated = df_project.loc[doc_id, 'Text_rotated']
-                    success, output, p_list = table_checker(doc_text, doc_text_rotated, doc_id, toc_id, toc_page,
-                                                            s1_rex, s2_rex)
+                    args.append((doc_text, doc_text_rotated, doc_id, toc_id, toc_page, s1_rex, s2_rex))
+
+            # Phase 2. Processing of arguments
+            # Sequential Mode (if using, comment out the multiprocessing mode code)
+            # results = []
+            # for arg in args:
+            #     results.append(table_checker(arg))
+            # Multiprocessing Mode (if using, comment out the sequential processing code)
+            with Pool() as pool:
+                results = pool.map(table_checker, args)
+
+            # Phase 3. Processing of results
+            for result in results:
+                success, output, p_list, doc_id = result
+                if not success:
                     print(output)
-                    if len(p_list) > 0:
-                        id_list.append(doc_id)
-                        page_list.extend(p_list)
-                        count += len(p_list)
+                if len(p_list) > 0:
+                    id_list.append(doc_id)
+                    page_list.extend(p_list)
+                    count += len(p_list)
+
             if len(id_list) == 1:
                 prev_id = id_list[0]
 
@@ -128,7 +150,9 @@ def get_titles_tables(project):
         df_tables.loc[index, 'location_Page'] = str(page_list).replace('[', '').replace(']', '').strip()
         df_tables.loc[index, 'count'] = count
     df_tables.to_csv(save_dir + project + '-final_tables.csv', index=False, encoding='utf-8-sig')
-    print(f"Finished {project}")
+
+    duration = round(time.time() - start_time)
+    print(f"Done {project} in {duration} seconds ({round(duration / 60, 2)} min or {round(duration / 3600, 2)} hours)")
 
 
 def get_titles_figures(project):
