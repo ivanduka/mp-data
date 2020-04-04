@@ -24,6 +24,7 @@ if __name__ == "__main__":
     # this does not need to be multiproccessed
 
     data = []
+    projects = all_projects['Hearing order'].unique()
     for project in projects:
         df = pd.read_csv(save_dir + project + '-final_tables.csv', encoding='utf-8-sig')
         data.append(df)

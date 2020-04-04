@@ -171,7 +171,7 @@ def get_titles_figures(project):
             prev_id = 0
             for index, row in df_figs.iterrows():
                 title = row['Name']
-                # print(title)
+                print(title)
                 c = title.count(' ')
                 if c >= 2:
                     word1, word2, s2 = title.split(' ', 2)
