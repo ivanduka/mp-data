@@ -12,20 +12,11 @@ if __name__ == "__main__":
     all_projects = pd.read_excel(projects_path)
     projects = all_projects['Hearing order'].unique()
     # print(projects)
-    projects = ['GH-002-2019', 'OH-001-2014', 'OH-002-2016']
-
-    results = []
+    projects = ['OH-002-2016']
 
     # Sequential Mode - if using, comment out the multiprocessing code
     for project in projects:
-        results.append(get_titles_figures(project))
-
-    # Multiprocessing Mode - if using, comment out the sequential code
-    # with Pool() as pool:
-    #    results = pool.map(get_titles_figures, projects)
-
-    for result in results:
-        print(result)
+        get_titles_figures(project)
 
     data = []
     projects = all_projects['Hearing order'].unique()
