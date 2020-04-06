@@ -4,7 +4,7 @@ import re
 from bs4 import BeautifulSoup
 import traceback
 
-whitespace = r'\s+'  # all white space
+import constants
 
 def table_checker(args):
     doc_text, doc_text_rotated, doc_id, toc_id, toc_page, s1_rex, s2_rex = args
@@ -17,7 +17,7 @@ def table_checker(args):
             soup = BeautifulSoup(doc_text, 'lxml')
             pages = soup.find_all('div', attrs={'class': 'page'})
             for page_num, page in enumerate(pages):
-                text_clean = re.sub(whitespace, ' ', page.text)
+                text_clean = re.sub(constants.whitespace, ' ', page.text)
                 # text_clean = re.sub(punctuation, ' ', text_clean)
                 if re.search(s1_rex, text_clean) and re.search(s2_rex, text_clean):
                     if (doc_id != toc_id) or (page_num != toc_page):
@@ -27,7 +27,7 @@ def table_checker(args):
             soup = BeautifulSoup(doc_text_rotated, 'lxml')
             pages = soup.find_all('div', attrs={'class': 'page'})
             for page_num, page in enumerate(pages):
-                text_clean = re.sub(whitespace, ' ', page.text)
+                text_clean = re.sub(constants.whitespace, ' ', page.text)
                 # text_clean = re.sub(punctuation, ' ', text_clean)
                 if re.search(s1_rex, text_clean) and re.search(s2_rex, text_clean):
                     if (doc_id != toc_id) or (page_num != toc_page):
@@ -49,7 +49,7 @@ def figure_checker(args):
             soup = BeautifulSoup(doc_text, 'lxml')
             pages = soup.find_all('div', attrs={'class': 'page'})
             for page_num, page in enumerate(pages):
-                text_clean = re.sub(whitespace, ' ', page.text)
+                text_clean = re.sub(constants.whitespace, ' ', page.text)
                 # text_clean = re.sub(punctuation, ' ', text_clean)
                 if re.search(word2_rex, text_clean) and re.search(s2_rex, text_clean):
                     if (doc_id != toc_id) or (page_num != toc_page):
@@ -59,7 +59,7 @@ def figure_checker(args):
             soup = BeautifulSoup(doc_text_rotated, 'lxml')
             pages = soup.find_all('div', attrs={'class': 'page'})
             for page_num, page in enumerate(pages):
-                text_clean = re.sub(whitespace, ' ', page.text)
+                text_clean = re.sub(constants.whitespace, ' ', page.text)
                 # text_clean = re.sub(punctuation, ' ', text_clean)
                 if re.search(word2_rex, text_clean) and re.search(s2_rex, text_clean):
                     if (doc_id != toc_id) or (page_num != toc_page):
