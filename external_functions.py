@@ -2,6 +2,11 @@ import pandas as pd
 import re
 import time
 from multiprocessing import Pool
+import pickle
+from bs4 import BeautifulSoup
+from io import StringIO
+from contextlib import redirect_stdout, redirect_stderr
+import traceback
 
 from external_external_functions import table_checker, figure_checker
 import constants
@@ -240,9 +245,9 @@ def get_titles_figures(project):
 def get_category(title):
     category = False
     # title_clean = re.sub(extra_chars, '', title) # get rid of some extra characters
-    title_clean = re.sub(punctuation, '', title)  # remove punctuation
-    title_clean = re.sub(small_word, '', title_clean)  # delete any 1 or 2 letter words without digits
-    title_clean = re.sub(whitespace, ' ', title_clean).strip()  # replace whitespace with single space
+    title_clean = re.sub(constants.punctuation, '', title)  # remove punctuation
+    title_clean = re.sub(constants.small_word, '', title_clean)  # delete any 1 or 2 letter words without digits
+    title_clean = re.sub(constants.whitespace, ' ', title_clean).strip()  # replace whitespace with single space
     num_words = title_clean.count(' ') + 1
     _, _, third, _ = (title_clean + '   ').split(' ', 3)
 
@@ -257,3 +262,45 @@ def get_category(title):
         else:
             category = 0
     return category
+
+def find_tag_title(row):
+    buf = StringIO()
+    with redirect_stdout(buf), redirect_stderr(buf):
+        try:
+            table_titles = []
+            table_titles_next = []
+            categories = []
+            data_id = row[1]['DataID']
+            page_num = row[1]['Page'] - 1
+            rank = int(row[1]['Real Order']) - 1
+            path = constants.pickles_path + str(data_id) + '.pkl'
+
+            with open(path, 'rb') as f:
+                data = pickle.load(f)
+            soup = BeautifulSoup(data['content'], 'lxml')
+            pages = soup.find_all('div', attrs={'class': 'page'})
+            page = pages[page_num]
+            lines = [x.text for x in page.find_all('p')]  # list of lines
+            num_lines = len(lines)
+            for i, line in enumerate(lines):
+                title = re.sub(constants.whitespace, ' ', line).strip()  # replace all whitespace with single space
+                # identify if this line is a table line (took out exceptions, should not need)
+                if re.match(constants.tables_rex, title):  # and not any(x in line.lower() for x in exceptions_list):
+                    if i < num_lines - 1:
+                        title_next = re.sub(constants.whitespace, ' ',
+                                            lines[i + 1]).strip()  # replace all whitespace with single space
+                    else:
+                        title_next = ''
+                    category = get_category(title)
+                    if category > 0:
+                        table_titles.append(title)
+                        table_titles_next.append(title_next)
+                        categories.append(category)
+            count = len(table_titles)
+            if rank < count:
+                return True, buf.getvalue(), row[0], table_titles[rank], table_titles_next[rank], categories[rank], count
+            else:
+                return True, buf.getvalue(), row[0], '', '', -1, count
+        except Exception as e:
+            traceback.print_tb(e.__traceback__)
+            return False, buf.getvalue(), row[0], '', '', -1, count

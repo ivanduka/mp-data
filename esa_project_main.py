@@ -1,16 +1,23 @@
 import pandas as pd
+import numpy as np
 import pickle
 from bs4 import BeautifulSoup
 import re
 import os
+from multiprocessing import Pool
+from fuzzywuzzy import fuzz
 
-from external_functions import get_titles_figures, get_titles_tables, get_category
+from external_functions import get_titles_figures, get_titles_tables, find_tag_title
 import constants
 
-load_pickles = 0 # need to load text from pickles and save to each project's csv
-get_toc = 0 # need to go through all docs to create lists of tables and figures in csvs
-get_figure_titles = 0 # find all figs page #
-get_table_titles = 0 # find all table page #
+load_pickles = 0  # need to load text from pickles and save to each project's csv
+get_toc = 0  # need to go through all docs to create lists of tables and figures in csvs
+get_figure_titles = 0  # find all figs page #
+get_table_titles = 0  # find all table page #
+create_csv1 = 1  # create csv of all the tables (from camelot csvs)
+create_csv2 = 1  # assign table titles to each table using text search method
+create_csv3 = 1  # assign table titles to each table using TOC method
+create_final = 1  # replace continued tables and create final table title
 
 if __name__ == "__main__":
     # get list of all documents and projects (Index2)
@@ -29,9 +36,9 @@ if __name__ == "__main__":
             df_project['Text_rotated'] = None
 
             for index, row in df_project.iterrows():
-                with open(constants.pickles_path + str(index) + '.pkl', 'rb') as f: #unrotated pickle
+                with open(constants.pickles_path + str(index) + '.pkl', 'rb') as f:  # unrotated pickle
                     data = pickle.load(f)
-                with open(constants.pickles_rotated_path + str(index) + '.pkl', 'rb') as f: # rotated pickle
+                with open(constants.pickles_rotated_path + str(index) + '.pkl', 'rb') as f:  # rotated pickle
                     data_rotated = pickle.load(f)
                 df_project.loc[index, 'Text'] = data['content']  # save the unrotated text
                 df_project.loc[index, 'Text_rotated'] = data_rotated['content']  # save the rotated text
@@ -44,7 +51,8 @@ if __name__ == "__main__":
         list_tables = []
         for project in projects:
             print(project)
-            df_project = pd.read_csv(constants.save_dir + 'project_' + project + '.csv', encoding='utf-8-sig', index_col='DataID')
+            df_project = pd.read_csv(constants.save_dir + 'project_' + project + '.csv', encoding='utf-8-sig',
+                                     index_col='DataID')
             for index, row in df_project.iterrows():
                 content = row['Text']
                 content_rotated = row['Text_rotated']
@@ -128,98 +136,100 @@ if __name__ == "__main__":
         df_all.to_csv(constants.save_dir + 'final_tables.csv', index=False, encoding='utf-8-sig')
 
     # put it all together
-    paths = os.listdir(constants.pickles_path)
-    all_paths = [constants.pickles_path + str(x) for x in paths] # paths to all the pickle files
+    if create_csv1:
+        paths = os.listdir(constants.pickles_path)
+        all_paths = [constants.pickles_path + str(x) for x in paths]  # paths to all the pickle files
 
-    # create csv with all tables
-    data = []
-    for csv_name in os.listdir(constants.csv_path):
-        name = csv_name.split('.')[0]
-        data_id, page, order = name.split('_')
-        data.append([csv_name, data_id, page, order])
-    df = pd.DataFrame(data, columns=['CSV_Name', 'DataID', 'Page', 'Order'])
-    df.to_csv(constants.save_dir + 'all_tables1.csv', index=False)
+        # create csv with all tables
+        data = []
+        for csv_name in os.listdir(constants.csv_path):
+            name = csv_name.split('.')[0]
+            data_id, page, order = name.split('_')
+            df_table = pd.read_csv(constants.csv_path + csv_name, header=0)
+            cols = df_table.columns.str.cat(sep=', ')
+            cols = re.sub(constants.whitespace, ' ', cols).strip()
+            data.append([csv_name, data_id, page, order, cols])
+        df = pd.DataFrame(data, columns=['CSV_Name', 'DataID', 'Page', 'Order', 'Columns'])
+        df.to_csv(constants.save_dir + 'all_tables1.csv', index=False)
 
     # add table titles using Viboud's method
-    df = pd.read_csv(constants.save_dir + 'all_tables1.csv', header=0)
-    df['Real Order'] = df.groupby(['DataID', 'Page'])['Order'].rank()
-    df['table titles'] = ''
-    df['table titles next'] = ''
-    df['categories'] = -1
-    df['count'] = 0
-    for index, row in df.iterrows():
-        # get all possible table titles on this page
-        page_numbers = []
-        table_titles = []
-        table_titles_next = []
-        categories = []
-        path = constants.pickles_path + str(row['DataID']) + '.pkl'
-        with open(path, 'rb') as f:
-            data = pickle.load(f)
-        soup = BeautifulSoup(data['content'], 'lxml')
-        pages = soup.find_all('div', attrs={'class': 'page'})
-        page_num = row['Page'] - 1
-        page = pages[page_num]
+    if create_csv2:
+        df = pd.read_csv(constants.save_dir + 'all_tables1.csv', header=0)
+        df['Real Order'] = df.groupby(['DataID', 'Page'])['Order'].rank()
+        df['table titles'] = ''
+        df['table titles next'] = ''
+        df['categories'] = -1
+        df['count'] = 0
 
-        lines = [x.text for x in page.find_all('p')]  # list of lines
-        num_lines = len(lines)
-        for i, line in enumerate(lines):
-            title = re.sub(constants.whitespace, ' ', line).strip()  # replace all whitespace with single space
-            # identify if this line is a table line (took out exceptions, should not need)
-            if re.match(constants.tables_rex, title):  # and not any(x in line.lower() for x in exceptions_list):
-                if i < num_lines - 1:
-                    title_next = re.sub(constants.whitespace, ' ',
-                                        lines[i + 1]).strip()  # replace all whitespace with single space
-                else:
-                    title_next = ''
-                category = get_category(title)
-                if category > 0:
-                    table_titles.append(title)
-                    table_titles_next.append(title_next)
-                    categories.append(category)
-        r = int(row['Real Order']) - 1
-        count = len(table_titles)
-        if r < count:
-            df.loc[index, 'table titles'] = table_titles[r]
-            df.loc[index, 'table titles next'] = table_titles_next[r]
-            df.loc[index, 'categories'] = categories[r]
-        else:
-            df.loc[index, 'table titles'] = ''
-            df.loc[index, 'table titles next'] = ''
-        df.loc[index, 'count'] = count
-        if index % 1000 == 0:
-            df.to_csv('all_tables2-temp.csv', index=False, encoding='utf-8-sig')
-    df['final table titles'] = np.where(df['categories'] == 2, df['table titles'] + ' ' + df['table titles next'],
-                                        df['table titles'])
-    df['final table titles'] = df['final table titles'].str.replace('\d+$', '', regex=True).str.strip()
-    df.to_csv(constants.save_dir + 'all_tables2.csv', index=False, encoding='utf-8-sig')
+        with Pool() as pool:
+            results = pool.map(find_tag_title, df.iterrows())
+        for result in results:
+            success, output, index, table_title, table_title_next, category, count = result
+            if success:
+                df.loc[index, 'table titles'] = table_title
+                df.loc[index, 'table titles next'] = table_title_next
+                df.loc[index, 'categories'] = category
+                df.loc[index, 'count'] = count
+            else:
+                print(output)
+        df['final table titles'] = np.where(df['categories'] == 2, df['table titles'] + ' ' + df['table titles next'],
+                                            df['table titles'])
+        # df['final table titles'] = df['final table titles'].str.replace('\d+$', '', regex=True).str.strip() # remove numbers from end
+        df.to_csv(constants.save_dir + 'all_tables2.csv', index=False, encoding='utf-8-sig')
 
     # add table titles from TOC method
-    df = pd.read_csv(constants.save_dir + 'all_tables2.csv', header=0)
-    df['TOC Title'] = ''
-    df['TOC count'] = 0
+    if create_csv3:
+        df = pd.read_csv(constants.save_dir + 'all_tables2.csv', header=0)
+        df['TOC Title'] = ''
+        df['TOC count'] = 0
 
-    df_all_titles = pd.read_csv('F:/Environmental Baseline Data/Version 4 - Final/Saved/final_tables.csv', header=0)
-    df_all_titles = df_all_titles[~df_all_titles['location_DataID'].astype(str).str.contains(',')]
-    df_all_titles['location_DataID'] = df_all_titles['location_DataID'].astype(float)  # .astype(int).satype(str)
+        df_all_titles = pd.read_csv('F:/Environmental Baseline Data/Version 4 - Final/Saved/final_tables.csv', header=0)
+        df_all_titles = df_all_titles[~df_all_titles['location_DataID'].astype(str).str.contains(',')]
+        df_all_titles['location_DataID'] = df_all_titles['location_DataID'].astype(float)  # .astype(int).satype(str)
 
-    for index, row in df.iterrows():
-        # find TOC title and assign
-        # print(row['DataID'])
-        data_id = int(row['DataID'])
-        page_rex = r'\b' + str(int(row['Page']) - 1) + r'\b'
-        order = row['Real Order']
-        df_titles = df_all_titles[(df_all_titles['location_DataID'] == row['DataID'])
-                                  & df_all_titles['location_Page'].str.contains(page_rex, regex=True)].reset_index()
-        count = df_titles.shape[0]
-        if order <= count:
-            df.loc[index, 'TOC Title'] = df_titles.loc[order - 1, 'Name']
-        df.loc[index, 'TOC count'] = count
+        for index, row in df.iterrows():
+            # find TOC title and assign
+            # print(row['DataID'])
+            data_id = int(row['DataID'])
+            page_rex = r'\b' + str(int(row['Page']) - 1) + r'\b'
+            order = row['Real Order']
+            df_titles = df_all_titles[(df_all_titles['location_DataID'] == row['DataID'])
+                                      & df_all_titles['location_Page'].str.contains(page_rex, regex=True)].reset_index()
+            count = df_titles.shape[0]
+            if order <= count:
+                df.loc[index, 'TOC Title'] = df_titles.loc[order - 1, 'Name']
+            df.loc[index, 'TOC count'] = count
 
-        count = df_titles.shape[0]
-    df.to_csv(constants.save_dir + 'all_tables3.csv', index=False, encoding='utf-8-sig')
+            count = df_titles.shape[0]
+        df.to_csv(constants.save_dir + 'all_tables3.csv', index=False, encoding='utf-8-sig')
 
-    df = pd.read_csv(constants.save_dir + 'all_tables3.csv', header=0)
-    df['Table Title'] = df['final table titles'].fillna(df['TOC Title'])
-    df.to_csv(constants.save_dir + 'all_tables-final.csv', index=False, encoding='utf-8-sig')
+    if create_final:
+        df = pd.read_csv(constants.save_dir + 'all_tables3.csv', header=0)
+        df['Table Title'] = df['final table titles'].fillna(df['TOC Title'])
+        # sort df by csv_name
+        df.sort_values('CSV_Name', ignore_index=True, inplace=True)
 
+        prev_id = 0
+        prev_title = ''
+        prev_cols = ''
+        # fill titles that are continuation of tables
+        for index, row in df.iterrows():
+            if (row['Table Title'] == '') or (row['categories'] == 1):
+                if row['DataID'] == prev_id:
+                    # check against previous table's columns
+                    cols = row['Columns']
+                    ratio_similarity = fuzz.token_sort_ratio(cols, prev_cols)
+
+                    if len(set(prev_cols.split(', ')).difference(set(cols.split(', ')))) == 0 \
+                            or len(set(prev_cols.split(', '))) == len(set(cols.split(', '))) \
+                            or ratio_similarity > 89:
+                        df.loc[index, 'Table Title'] = prev_title
+                else:
+                    prev_title = row['Table Title']
+            else:
+                prev_title = ''
+        else:
+            prev_title = row['Table Title']
+        prev_id = row['DataID']
+        prev_cols = row['Columns']
+        df.to_csv(constants.save_dir + 'all_tables-final.csv', index=False, encoding='utf-8-sig')
