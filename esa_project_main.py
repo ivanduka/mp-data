@@ -6,24 +6,34 @@ import re
 import os
 from multiprocessing import Pool
 from fuzzywuzzy import fuzz
+from sqlalchemy import text, create_engine
+from dotenv import load_dotenv
 
 from external_functions import get_titles_figures, get_titles_tables, find_tag_title
 import constants
 
+load_dotenv(override=True)
+engine_string = f"mysql+mysqldb://esa_user_rw:{os.getenv('DB_PASS')}@os25.neb-one.gc.ca./esa?charset=utf8"
+engine = create_engine(engine_string)
+
+from_db = 1  # will get data from db, will write titles to db
 load_pickles = 0  # need to load text from pickles and save to each project's csv
 get_toc = 0  # need to go through all docs to create lists of tables and figures in csvs
 get_figure_titles = 0  # find all figs page #
 get_table_titles = 0  # find all table page #
 create_csv1 = 1  # create csv of all the tables (from camelot csvs)
-create_csv2 = 1  # assign table titles to each table using text search method
-create_csv3 = 1  # assign table titles to each table using TOC method
-create_final = 1  # replace continued tables and create final table title
+create_csv2 = 0  # assign table titles to each table using text search method
+create_csv3 = 0  # assign table titles to each table using TOC method
+create_final = 0  # replace continued tables and create final table title
 
 if __name__ == "__main__":
     # get list of all documents and projects (Index2)
-    all_projects = pd.read_excel(constants.projects_path)
-    projects = all_projects['Hearing order'].unique()
-    print(projects)
+    if from_db:
+        projects = []
+    else:
+        all_projects = pd.read_excel(constants.projects_path)
+        projects = all_projects['Hearing order'].unique()
+    # print(projects)
 
     # get text for each document in all projects
     if load_pickles:
@@ -137,19 +147,25 @@ if __name__ == "__main__":
 
     # put it all together
     if create_csv1:
-        paths = os.listdir(constants.pickles_path)
-        all_paths = [constants.pickles_path + str(x) for x in paths]  # paths to all the pickle files
+        if from_db:
+            with engine.connect() as conn:
+                stmt = text("SELECT csvFullPath, pdfId, page, tableNumber, topRowJson FROM csvs "
+                            "WHERE (hasContent = 1) and (csvColumns > 1) and (whitespace < 78);")
+                df = pd.read_sql(stmt, conn)
+        else:
+            paths = os.listdir(constants.pickles_path)
+            all_paths = [constants.pickles_path + str(x) for x in paths]  # paths to all the pickle files
 
-        # create csv with all tables
-        data = []
-        for csv_name in os.listdir(constants.csv_path):
-            name = csv_name.split('.')[0]
-            data_id, page, order = name.split('_')
-            df_table = pd.read_csv(constants.csv_path + csv_name, header=0)
-            cols = df_table.columns.str.cat(sep=', ')
-            cols = re.sub(constants.whitespace, ' ', cols).strip()
-            data.append([csv_name, data_id, page, order, cols])
-        df = pd.DataFrame(data, columns=['CSV_Name', 'DataID', 'Page', 'Order', 'Columns'])
+            # create csv with all tables
+            data = []
+            for csv_name in os.listdir(constants.csv_path):
+                name = csv_name.split('.')[0]
+                data_id, page, order = name.split('_')
+                df_table = pd.read_csv(constants.csv_path + csv_name, header=0)
+                cols = df_table.columns.str.cat(sep=', ')
+                cols = re.sub(constants.whitespace, ' ', cols).strip()
+                data.append([csv_name, data_id, page, order, cols])
+            df = pd.DataFrame(data, columns=['CSV_Name', 'DataID', 'Page', 'Order', 'Columns'])
         df.to_csv(constants.save_dir + 'all_tables1.csv', index=False)
 
     # add table titles using Viboud's method

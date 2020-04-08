@@ -62,8 +62,8 @@ def update_test_data(data_id, some_text):
 
 
 if __name__ == "__main__":
-    # print("Get all CSVs")
-    # print(get_all_csvs().head())
+    #print("Get all CSVs")
+    #print(get_all_csvs().head())
 
     # print("Get all PDFs")
     # print(get_all_pdfs().head())
