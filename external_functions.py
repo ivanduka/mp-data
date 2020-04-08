@@ -7,9 +7,18 @@ from bs4 import BeautifulSoup
 from io import StringIO
 from contextlib import redirect_stdout, redirect_stderr
 import traceback
+from sqlalchemy import text, create_engine
+from dotenv import load_dotenv
+import os
+from fuzzywuzzy import fuzz
+import json
 
 from external_external_functions import table_checker, figure_checker
 import constants
+
+load_dotenv(override=True)
+engine_string = f"mysql+mysqldb://esa_user_rw:{os.getenv('DB_PASS')}@os25.neb-one.gc.ca./esa?charset=utf8"
+engine = create_engine(engine_string)
 
 # function that takes ID of project, and finds locations of all the tables from that projects' TOC
 # saves result to save_dir folder
@@ -263,23 +272,21 @@ def get_category(title):
             category = 0
     return category
 
-def find_tag_title(row):
+def find_tag_title_old(row):
     buf = StringIO()
+    final_table_titles = []
+    data_id = row[1]['pdfId']
+    page_num = row[1]['page']
+    table_num = row[1]['tableNumber']
+    rank = int(row[1]['Real Order'])
+    path = constants.pickles_path + str(data_id) + '.pkl'
     with redirect_stdout(buf), redirect_stderr(buf):
         try:
-            table_titles = []
-            table_titles_next = []
-            categories = []
-            data_id = row[1]['DataID']
-            page_num = row[1]['Page'] - 1
-            rank = int(row[1]['Real Order']) - 1
-            path = constants.pickles_path + str(data_id) + '.pkl'
-
             with open(path, 'rb') as f:
                 data = pickle.load(f)
             soup = BeautifulSoup(data['content'], 'lxml')
             pages = soup.find_all('div', attrs={'class': 'page'})
-            page = pages[page_num]
+            page = pages[page_num - 1]
             lines = [x.text for x in page.find_all('p')]  # list of lines
             num_lines = len(lines)
             for i, line in enumerate(lines):
@@ -287,20 +294,186 @@ def find_tag_title(row):
                 # identify if this line is a table line (took out exceptions, should not need)
                 if re.match(constants.tables_rex, title):  # and not any(x in line.lower() for x in exceptions_list):
                     if i < num_lines - 1:
-                        title_next = re.sub(constants.whitespace, ' ',
-                                            lines[i + 1]).strip()  # replace all whitespace with single space
+                        title_next = re.sub(constants.whitespace, ' ', lines[i + 1]).strip()
                     else:
                         title_next = ''
                     category = get_category(title)
                     if category > 0:
-                        table_titles.append(title)
-                        table_titles_next.append(title_next)
-                        categories.append(category)
-            count = len(table_titles)
-            if rank < count:
-                return True, buf.getvalue(), row[0], table_titles[rank], table_titles_next[rank], categories[rank], count
-            else:
-                return True, buf.getvalue(), row[0], '', '', -1, count
+                        if category == 2:
+                            final_table_title = title + ' ' + title_next
+                        else:
+                            final_table_title = title
+                        final_table_titles.append(final_table_title)
+
+            if rank <= len(final_table_titles):
+                final_table_title = final_table_titles[rank - 1]
+                # update the db
+                with engine.connect() as conn:
+                    stmt = text("UPDATE csvs SET titleTag = :title_tag WHERE (pdfId = :pdf_id) and "
+                                "(page = :page_num) and (tableNumber = :table_num);")
+                    params = {"pdf_id": data_id, "page_num": page_num, "table_num": table_num,
+                              "title_tag": final_table_title}
+                    result = conn.execute(stmt, params)
+                    if result.rowcount != 1:
+                        print(data_id, '_', page_num, '_', table_num, ':', final_table_title,
+                              ': did not insert in database, error:', result)
+            return True, buf.getvalue()
         except Exception as e:
             traceback.print_tb(e.__traceback__)
-            return False, buf.getvalue(), row[0], '', '', -1, count
+            return False, buf.getvalue()
+
+
+def find_tag_title(data_id):
+    buf = StringIO()
+    with redirect_stdout(buf), redirect_stderr(buf):
+        try:
+            conn = engine.connect()
+            # get tables for this document
+            stmt = text("SELECT page, tableNumber FROM csvs "
+                        "WHERE (hasContent = 1) and (csvColumns > 1) and (whitespace < 78) "
+                        "and (pdfId = :pdf_id);")
+            params = {"pdf_id": data_id}
+            df = pd.read_sql_query(stmt, conn, params=params)
+            df['Real Order'] = df.groupby(['page'])['tableNumber'].rank()
+
+            # get text for this document
+            path = constants.pickles_path + str(data_id) + '.pkl'
+            with open(path, 'rb') as f:
+                data = pickle.load(f)
+            soup = BeautifulSoup(data['content'], 'lxml')
+            pages = soup.find_all('div', attrs={'class': 'page'})
+            tables_pages = df['page'].unique()
+
+            for page_num in tables_pages:
+                page_tables = df[df['page'] == page_num].set_index('Real Order')
+                page_text = pages[page_num - 1]
+                lines = [x.text for x in page_text.find_all('p')]  # list of lines
+                num_lines = len(lines)
+                final_table_titles = [] # holds all titles found on this page
+                for i, line in enumerate(lines):
+                    title = re.sub(constants.whitespace, ' ', line).strip()  # replace all whitespace with single space
+                    # identify if this line is a table line (took out exceptions, should not need)
+                    if re.match(constants.tables_rex, title):  # and not any(x in line.lower() for x in exceptions_list):
+                        if i < num_lines - 1:
+                            title_next = re.sub(constants.whitespace, ' ', lines[i + 1]).strip()
+                        else:
+                            title_next = ''
+                        category = get_category(title)
+                        if category > 0:
+                            if category == 2:
+                                final_table_title = title + ' ' + title_next
+                            else:
+                                final_table_title = title
+                            final_table_titles.append(final_table_title)
+
+                count_tables = page_tables.shape[0]
+                for i, title in enumerate(final_table_titles):
+                    if i < count_tables:
+                        # update the db
+                        table_num = page_tables.loc[i+1, 'tableNumber']
+                        stmt = text("UPDATE csvs SET titleTag = :title_tag WHERE (pdfId = :pdf_id) and "
+                                    "(page = :page_num) and (tableNumber = :table_num);")
+                        params = {"pdf_id": data_id, "page_num": page_num, "table_num": table_num, "title_tag": title}
+                        result = conn.execute(stmt, params)
+                        if result.rowcount != 1:
+                            print('Could not assign:', data_id, '_', page_num, '_', table_num, '_', i+1, ':', title,
+                                  ': error:', result)
+                    else:
+                        print('Not enough tables for:', data_id, '_', page_num, '_', i + 1, ':', title)
+            return True, buf.getvalue()
+        except Exception as e:
+            traceback.print_tb(e.__traceback__)
+            return False, buf.getvalue()
+        finally:
+            conn.close()
+
+def find_toc_title(data_id):
+    buf = StringIO()
+    with redirect_stdout(buf), redirect_stderr(buf):
+        try:
+            conn = engine.connect()
+            # get tables for this document
+            stmt = text("SELECT page, tableNumber FROM csvs "
+                        "WHERE (hasContent = 1) and (csvColumns > 1) and (whitespace < 78) "
+                        "and (pdfId = :pdf_id);")
+            params = {"pdf_id": data_id}
+            df = pd.read_sql_query(stmt, conn, params=params)
+            df['Real Order'] = df.groupby(['page'])['tableNumber'].rank()
+
+            df_all_titles = pd.read_csv(constants.main_path + 'Saved/final_tables.csv', header=0)
+            # df_all_titles = df_all_titles[~df_all_titles['location_DataID'].astype(str).str.contains(',')]
+            df_all_titles = df_all_titles[df_all_titles['location_DataID'].astype(str).str.strip() == str(data_id)]
+            df_all_titles['location_DataID'] = df_all_titles['location_DataID'].astype(float)  # .astype(int).satype(str)
+
+            for index, row in df.iterrows():
+                page_num = row['page']
+                table_num = row['tableNumber']
+                # find TOC title and assign
+                page_rex = r'\b' + str(page_num - 1) + r'\b'
+                order = row['Real Order']
+                df_titles = df_all_titles[df_all_titles['location_Page'].str.contains(page_rex, regex=True)].reset_index()
+                if df_titles.shape[0] >= order:
+                    title = df_titles.loc[order-1, 'Name']
+                    # update the db
+                    stmt = text("UPDATE csvs SET titleTOC = :title_toc WHERE (pdfId = :pdf_id) and "
+                                "(page = :page_num) and (tableNumber = :table_num);")
+                    params = {"pdf_id": data_id, "page_num": page_num, "table_num": table_num, "title_toc": title}
+                    result = conn.execute(stmt, params)
+                    if result.rowcount != 1:
+                        print('Could not assign:', data_id, '_', page_num, '_', table_num, '_', order, ':', title,
+                              ': error:', result)
+            return True, buf.getvalue()
+        except Exception as e:
+            traceback.print_tb(e.__traceback__)
+            return False, buf.getvalue()
+        finally:
+            conn.close()
+
+def find_final_title(data_id):
+    buf = StringIO()
+    with redirect_stdout(buf), redirect_stderr(buf):
+        try:
+            conn = engine.connect()
+            # get tables for this document
+            stmt = text("SELECT page, tableNumber, titleTag, titleTOC, topRowJson FROM csvs "
+                        "WHERE (hasContent = 1) and (csvColumns > 1) and (whitespace < 78) "
+                        "and (pdfId = :pdf_id);")
+            params = {"pdf_id": data_id}
+            df = pd.read_sql_query(stmt, conn, params=params)
+            df['Real Order'] = df.groupby(['page'])['tableNumber'].rank()
+            df['titleFinal'] = df['titleTag'].fillna(df['titleTOC']).fillna('')
+            # sort df by page and then order
+            df.sort_values(['page', 'Real Order'], ignore_index=True, inplace=True)
+
+            prev_title = ''
+            prev_cols_list = []
+            # fill titles that are continuation of tables
+            for index, row in df.iterrows():
+                cols_list = json.loads(row['topRowJson'])
+                title = row['titleFinal']
+                page_num = row['page']
+                table_num = row['tableNumber']
+                if (row['titleFinal'] == '') or (row['titleFinal'].contains('cont')):
+                    # check against previous table's columns
+                    cols = ', '.join(cols_list)
+                    prev_cols = ', '.join(prev_cols_list)
+                    ratio_similarity = fuzz.token_sort_ratio(cols, prev_cols)
+                    if len(set(prev_cols_list).difference(set(cols_list))) == 0 \
+                            or len(prev_cols_list) == len(cols_list) \
+                            or ratio_similarity > 89:
+                        title = prev_title
+                # update database
+                stmt = text("UPDATE csvs SET titleFinal = :title WHERE (pdfId = :pdf_id) and "
+                            "(page = :page_num) and (tableNumber = :table_num);")
+                params = {"pdf_id": data_id, "page_num": page_num, "table_num": table_num, "title": title}
+                result = conn.execute(stmt, params)
+                if result.rowcount != 1:
+                    print('Could not find:', data_id, '_', page_num, '_', table_num, ':', title, ': error:', result)
+                prev_title = title
+                prev_cols_list = cols_list
+            return True, buf.getvalue()
+        except Exception as e:
+            traceback.print_tb(e.__traceback__)
+            return False, buf.getvalue()
+        finally:
+            conn.close()

@@ -5,30 +5,27 @@ from bs4 import BeautifulSoup
 import re
 import os
 from multiprocessing import Pool
-from fuzzywuzzy import fuzz
 from sqlalchemy import text, create_engine
 from dotenv import load_dotenv
 
-from external_functions import get_titles_figures, get_titles_tables, find_tag_title
+from external_functions import get_titles_figures, get_titles_tables, find_tag_title, find_toc_title, find_final_title
 import constants
 
 load_dotenv(override=True)
 engine_string = f"mysql+mysqldb://esa_user_rw:{os.getenv('DB_PASS')}@os25.neb-one.gc.ca./esa?charset=utf8"
 engine = create_engine(engine_string)
 
-from_db = 1  # will get data from db, will write titles to db
 load_pickles = 0  # need to load text from pickles and save to each project's csv
 get_toc = 0  # need to go through all docs to create lists of tables and figures in csvs
 get_figure_titles = 0  # find all figs page #
 get_table_titles = 0  # find all table page #
-create_csv1 = 1  # create csv of all the tables (from camelot csvs)
-create_csv2 = 0  # assign table titles to each table using text search method
-create_csv3 = 0  # assign table titles to each table using TOC method
-create_final = 0  # replace continued tables and create final table title
+do_tag_title = 1  # assign table titles to each table using text search method
+do_toc_title = 1  # assign table titles to each table using TOC method
+do_final_title = 1  # replace continued tables and create final table title
 
 if __name__ == "__main__":
     # get list of all documents and projects (Index2)
-    if from_db:
+    if 1:
         projects = []
     else:
         all_projects = pd.read_excel(constants.projects_path)
@@ -146,106 +143,42 @@ if __name__ == "__main__":
         df_all.to_csv(constants.save_dir + 'final_tables.csv', index=False, encoding='utf-8-sig')
 
     # put it all together
-    if create_csv1:
-        if from_db:
-            with engine.connect() as conn:
-                stmt = text("SELECT csvFullPath, pdfId, page, tableNumber, topRowJson FROM csvs "
-                            "WHERE (hasContent = 1) and (csvColumns > 1) and (whitespace < 78);")
-                df = pd.read_sql(stmt, conn)
-        else:
-            paths = os.listdir(constants.pickles_path)
-            all_paths = [constants.pickles_path + str(x) for x in paths]  # paths to all the pickle files
+    with engine.connect() as conn:
+        stmt = text("SELECT csvFullPath, pdfId, page, tableNumber FROM csvs "
+                    "WHERE (hasContent = 1) and (csvColumns > 1) and (whitespace < 78);")
+        df = pd.read_sql_query(stmt, conn)
+    list_ids = df['pdfId'].unique()
+    df.to_csv(constants.save_dir + 'all_tables_list.csv', index=False)
 
-            # create csv with all tables
-            data = []
-            for csv_name in os.listdir(constants.csv_path):
-                name = csv_name.split('.')[0]
-                data_id, page, order = name.split('_')
-                df_table = pd.read_csv(constants.csv_path + csv_name, header=0)
-                cols = df_table.columns.str.cat(sep=', ')
-                cols = re.sub(constants.whitespace, ' ', cols).strip()
-                data.append([csv_name, data_id, page, order, cols])
-            df = pd.DataFrame(data, columns=['CSV_Name', 'DataID', 'Page', 'Order', 'Columns'])
-        df.to_csv(constants.save_dir + 'all_tables1.csv', index=False)
-
-    # add table titles using Viboud's method
-    if create_csv2:
-        df = pd.read_csv(constants.save_dir + 'all_tables1.csv', header=0)
-        df['Real Order'] = df.groupby(['DataID', 'Page'])['Order'].rank()
-        df['table titles'] = ''
-        df['table titles next'] = ''
-        df['categories'] = -1
-        df['count'] = 0
-
+    # update tag method titles
+    if do_tag_title:
+        print(len(list_ids))
         with Pool() as pool:
-            results = pool.map(find_tag_title, df.iterrows())
+            results = pool.map(find_tag_title, list_ids)
         for result in results:
-            success, output, index, table_title, table_title_next, category, count = result
-            if success:
-                df.loc[index, 'table titles'] = table_title
-                df.loc[index, 'table titles next'] = table_title_next
-                df.loc[index, 'categories'] = category
-                df.loc[index, 'count'] = count
-            else:
-                print(output)
-        df['final table titles'] = np.where(df['categories'] == 2, df['table titles'] + ' ' + df['table titles next'],
-                                            df['table titles'])
-        # df['final table titles'] = df['final table titles'].str.replace('\d+$', '', regex=True).str.strip() # remove numbers from end
-        df.to_csv(constants.save_dir + 'all_tables2.csv', index=False, encoding='utf-8-sig')
+            if result[1] != '':
+                print(result[1])
 
-    # add table titles from TOC method
-    if create_csv3:
-        df = pd.read_csv(constants.save_dir + 'all_tables2.csv', header=0)
-        df['TOC Title'] = ''
-        df['TOC count'] = 0
+    # update TOC method titles
+    if do_toc_title:
+        print(len(list_ids))
+        with Pool() as pool:
+            results = pool.map(find_toc_title, list_ids)
+        for result in results:
+            if result[1] != '':
+                print(result[1])
 
-        df_all_titles = pd.read_csv('F:/Environmental Baseline Data/Version 4 - Final/Saved/final_tables.csv', header=0)
-        df_all_titles = df_all_titles[~df_all_titles['location_DataID'].astype(str).str.contains(',')]
-        df_all_titles['location_DataID'] = df_all_titles['location_DataID'].astype(float)  # .astype(int).satype(str)
+    # update final titles
+    if do_final_title:
+        print(len(list_ids))
+        with Pool() as pool:
+            results = pool.map(find_final_title, list_ids)
+        for result in results:
+            if result[1] != '':
+                print(result[1])
 
-        for index, row in df.iterrows():
-            # find TOC title and assign
-            # print(row['DataID'])
-            data_id = int(row['DataID'])
-            page_rex = r'\b' + str(int(row['Page']) - 1) + r'\b'
-            order = row['Real Order']
-            df_titles = df_all_titles[(df_all_titles['location_DataID'] == row['DataID'])
-                                      & df_all_titles['location_Page'].str.contains(page_rex, regex=True)].reset_index()
-            count = df_titles.shape[0]
-            if order <= count:
-                df.loc[index, 'TOC Title'] = df_titles.loc[order - 1, 'Name']
-            df.loc[index, 'TOC count'] = count
-
-            count = df_titles.shape[0]
-        df.to_csv(constants.save_dir + 'all_tables3.csv', index=False, encoding='utf-8-sig')
-
-    if create_final:
-        df = pd.read_csv(constants.save_dir + 'all_tables3.csv', header=0)
-        df['Table Title'] = df['final table titles'].fillna(df['TOC Title'])
-        # sort df by csv_name
-        df.sort_values('CSV_Name', ignore_index=True, inplace=True)
-
-        prev_id = 0
-        prev_title = ''
-        prev_cols = ''
-        # fill titles that are continuation of tables
-        for index, row in df.iterrows():
-            if (row['Table Title'] == '') or (row['categories'] == 1):
-                if row['DataID'] == prev_id:
-                    # check against previous table's columns
-                    cols = row['Columns']
-                    ratio_similarity = fuzz.token_sort_ratio(cols, prev_cols)
-
-                    if len(set(prev_cols.split(', ')).difference(set(cols.split(', ')))) == 0 \
-                            or len(set(prev_cols.split(', '))) == len(set(cols.split(', '))) \
-                            or ratio_similarity > 89:
-                        df.loc[index, 'Table Title'] = prev_title
-                else:
-                    prev_title = row['Table Title']
-            else:
-                prev_title = ''
-        else:
-            prev_title = row['Table Title']
-        prev_id = row['DataID']
-        prev_cols = row['Columns']
-        df.to_csv(constants.save_dir + 'all_tables-final.csv', index=False, encoding='utf-8-sig')
+    with engine.connect() as conn:
+        stmt = text("SELECT csvFullPath, pdfId, page, tableNumber, topRowJson, titleTag, titleTOC, titleFinal FROM csvs "
+                    "WHERE (hasContent = 1) and (csvColumns > 1) and (whitespace < 78);")
+        df = pd.read_sql_query(stmt, conn)
+    df.to_csv(constants.save_dir + 'all_tables-final.csv', index=False)

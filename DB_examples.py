@@ -62,8 +62,8 @@ def update_test_data(data_id, some_text):
 
 
 if __name__ == "__main__":
-    #print("Get all CSVs")
-    #print(get_all_csvs().head())
+    print("Get all CSVs")
+    print(get_all_csvs().head())
 
     # print("Get all PDFs")
     # print(get_all_pdfs().head())
@@ -71,18 +71,18 @@ if __name__ == "__main__":
     # print("Get CSVs for specific file and page")
     # print(get_csvs(1059875, 32))
 
-    deleted = delete_all_test_data()
-    print(f"Deleted {deleted} rows")
-    print("-----------------------")
-
-    items = [(1, "one"), (2, "two"), (3, "three")]
-    for item in items:
-        inserted = insert_test_data(item[0], item[1])
-        print(f"Inserted {inserted} rows for {item}")
-    print("-----------------------")
-
-    items2 = [(1, "uno"), (2, "duo"), (999, "whatever")]
-    for item in items2:
-        updated = update_test_data(item[0], item[1])
-        print(f"Update {updated} rows for {item}")
-    print("-----------------------")
+    # deleted = delete_all_test_data()
+    # print(f"Deleted {deleted} rows")
+    # print("-----------------------")
+    #
+    # items = [(1, "one"), (2, "two"), (3, "three")]
+    # for item in items:
+    #     inserted = insert_test_data(item[0], item[1])
+    #     print(f"Inserted {inserted} rows for {item}")
+    # print("-----------------------")
+    #
+    # items2 = [(1, "uno"), (2, "duo"), (999, "whatever")]
+    # for item in items2:
+    #     updated = update_test_data(item[0], item[1])
+    #     print(f"Update {updated} rows for {item}")
+    # print("-----------------------")
