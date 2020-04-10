@@ -17,20 +17,24 @@ engine = create_engine(engine_string)
 
 load_pickles = 0  # need to load text from pickles and save to each project's csv
 get_toc = 0  # need to go through all docs to create lists of tables and figures in csvs
-get_figure_titles = 0  # find all figs page #
+get_figure_titles = 1  # find all figs page #
 get_table_titles = 0  # find all table page #
-do_tag_title = 1  # assign table titles to each table using text search method
-do_toc_title = 1  # assign table titles to each table using TOC method
-do_final_title = 1  # replace continued tables and create final table title
+do_tag_title = 0  # assign table titles to each table using text search method
+do_toc_title = 0  # assign table titles to each table using TOC method
+do_final_title = 0  # replace continued tables and create final table title
 
 if __name__ == "__main__":
     # get list of all documents and projects (Index2)
     if 1:
-        projects = []
+        # put it all together
+        with engine.connect() as conn:
+            stmt = text("SELECT pdfId, hearingOrder FROM esa.pdfs")
+            all_projects = pd.read_sql_query(stmt, conn)
+            projects = all_projects['hearingOrder'].unique()
     else:
         all_projects = pd.read_excel(constants.projects_path)
         projects = all_projects['Hearing order'].unique()
-    # print(projects)
+    print(projects)
 
     # get text for each document in all projects
     if load_pickles:
@@ -105,7 +109,7 @@ if __name__ == "__main__":
 
         # put everything together
         data = []
-        projects = all_projects['Hearing order'].unique()
+        projects = all_projects['hearingOrder'].unique()
         for project in projects:
             df = pd.read_csv(constants.save_dir + project + '-final_figs.csv', encoding='utf-8-sig')
             data.append(df)
@@ -144,41 +148,50 @@ if __name__ == "__main__":
 
     # put it all together
     with engine.connect() as conn:
-        stmt = text("SELECT csvFullPath, pdfId, page, tableNumber FROM csvs "
+        stmt = text("SELECT csvFullPath, pdfId, page, tableNumber FROM esa.csvs "
                     "WHERE (hasContent = 1) and (csvColumns > 1) and (whitespace < 78);")
         df = pd.read_sql_query(stmt, conn)
     list_ids = df['pdfId'].unique()
-    df.to_csv(constants.save_dir + 'all_tables_list.csv', index=False)
+    df.to_csv(constants.save_dir + 'all_tables_list.csv', index=False, encoding='utf-8-sig')
 
     # update tag method titles
     if do_tag_title:
-        print(len(list_ids))
+        #print(len(list_ids))
         with Pool() as pool:
             results = pool.map(find_tag_title, list_ids)
-        for result in results:
-            if result[1] != '':
-                print(result[1])
+        with open('tag_errors.txt', 'w', encoding='utf-8') as f:
+            f.write('Errors found:\n')
+        with open('tag_errors.txt', 'a', encoding='utf-8') as f:
+            for result in results:
+                if result[1] != "":
+                    f.write(str(result[1]))
 
     # update TOC method titles
     if do_toc_title:
-        print(len(list_ids))
+        #print(len(list_ids))
         with Pool() as pool:
             results = pool.map(find_toc_title, list_ids)
-        for result in results:
-            if result[1] != '':
-                print(result[1])
+        with open('toc_errors.txt', 'w', encoding='utf-8') as f:
+            f.write('Errors found:\n')
+        with open("toc_errors.txt", "a", encoding='utf-8') as f:
+            for result in results:
+                if result[1]:
+                    f.write(result[1])
 
     # update final titles
     if do_final_title:
-        print(len(list_ids))
+        #print(len(list_ids))
         with Pool() as pool:
             results = pool.map(find_final_title, list_ids)
-        for result in results:
-            if result[1] != '':
-                print(result[1])
+        with open('final_errors.txt', 'w', encoding='utf-8') as f:
+            f.write('Errors found:\n')
+        with open("final_errors.txt", "a", encoding='utf-8') as f:
+            for result in results:
+                if result[1]:
+                    f.write(result[1])
 
     with engine.connect() as conn:
-        stmt = text("SELECT csvFullPath, pdfId, page, tableNumber, topRowJson, titleTag, titleTOC, titleFinal FROM csvs "
+        stmt = text("SELECT csvFullPath, pdfId, page, tableNumber, topRowJson, titleTag, titleTOC, titleFinal FROM esa.csvs "
                     "WHERE (hasContent = 1) and (csvColumns > 1) and (whitespace < 78);")
         df = pd.read_sql_query(stmt, conn)
-    df.to_csv(constants.save_dir + 'all_tables-final.csv', index=False)
+    df.to_csv(constants.save_dir + 'all_tables-final.csv', index=False, encoding='utf-8-sig')
