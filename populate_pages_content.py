@@ -35,6 +35,8 @@ os.environ["TIKA_STARTUP_MAX_RETRY"] = "10"
 os.environ["TIKA_CLIENT_ONLY"] = "True"
 os.environ["TIKA_SERVER_ENDPOINT"] = "http://127.0.0.1:9998"
 
+tmp_folder = Path.cwd().joinpath("tmp")
+
 
 def clear_db():
     stmt1 = "DELETE FROM pages_normal_txt;"
@@ -50,7 +52,7 @@ def clear_db():
 
 
 def clean_tmp():
-    g = list(Path().resolve().parent.joinpath("tmp").glob("*"))
+    g = list(tmp_folder.glob("*.pdf"))
     for f in g:
         try:
             f.unlink()
@@ -71,8 +73,7 @@ def insert_contents():
     parser.from_file(__file__)  # testing tika server
     print('Server apparently works...')
 
-    clean_tmp()
-
+    # clean_tmp()
     # skipping = []
     # current_id = None
     # for row in data:
@@ -84,24 +85,27 @@ def insert_contents():
     #         print(f"{current_id}: {e}")
     # print(skipping)
 
-    with Pool() as pool:
-        pool.map(insert_content, data, chunksize=1)
+    # for row in data:
+    #     insert_content(row)
 
-    # count = 0
-    # while True:
-    #     try:
-    #         clean_tmp()
-    #         with Pool() as pool:
-    #             pool.map(insert_content, data, chunksize=1)
-    #     except Exception as e:
-    #         print("\n===========================================================\n")
-    #         print(f"Counter: {count}: {e}")
-    #         traceback.print_tb(e.__traceback__)
-    #         print("\n===========================================================\n")
-    #         count += 1
-    #     else:
-    #         print(f"Final counter value is {count}")
-    #         break
+    # with Pool() as pool:
+    #     pool.map(insert_content, data, chunksize=1)
+
+    count = 0
+    while True:
+        try:
+            clean_tmp()
+            with Pool() as pool:
+                pool.map(insert_content, data, chunksize=1)
+        except Exception as e:
+            print("\n===========================================================\n")
+            print(f"Counter: {count}: {e}")
+            traceback.print_tb(e.__traceback__)
+            print("\n===========================================================\n")
+            count += 1
+        else:
+            print(f"Final counter value is {count}")
+            break
 
     sec = round(time.time() - t)
     print(f"Done {len(data)} in {sec} seconds ({round(sec / 60, 2)} min or {round(sec / 3600, 2)} hours)")
@@ -111,7 +115,7 @@ def insert_content(row):
     # start_time = time.time()
 
     pdf_id, total_pages = row["pdfId"], int(row["totalPages"])
-    process_pdf(pdf_id, total_pages, True, True)
+    # process_pdf(pdf_id, total_pages, True, True)
     process_pdf(pdf_id, total_pages, False, True)
     # process_pdf(pdf_id, total_pages, True, False)
     # process_pdf(pdf_id, total_pages, False, False)
@@ -121,7 +125,7 @@ def insert_content(row):
 
 
 def process_pdf(pdf_id, pages, xml, normal):
-    print(f"Starting {pdf_id}")
+    # print(f"Starting {pdf_id}")
     pdf = pdf_files_folder_normal.joinpath(f"{pdf_id}.pdf")
     if not normal:
         pdf = pdf_files_folder_rotated.joinpath(f"{pdf_id}.pdf")
@@ -132,7 +136,6 @@ def process_pdf(pdf_id, pages, xml, normal):
         reader = PyPDF2.PdfFileReader(infile)
         if reader.isEncrypted:
             reader.decrypt("")
-        return
         for p in range(1, pages + 1):
             if normal and xml:
                 check = "SELECT pdfId FROM pages_normal_xml WHERE pdfId = %s AND page_num = %s;"
@@ -153,7 +156,7 @@ def process_pdf(pdf_id, pages, xml, normal):
 
             writer = PyPDF2.PdfFileWriter()
             writer.addPage(reader.getPage(p - 1))  # Reads from 0 page
-            random_file = Path().resolve().parent.joinpath("tmp").joinpath(f"{os.urandom(24).hex()}.pdf")
+            random_file = tmp_folder.joinpath(f"{os.urandom(24).hex()}.pdf")
             with random_file.open(mode="wb") as outfile:
                 writer.write(outfile)
             content = parser.from_file(outfile.name, xmlContent=xml, requestOptions={'timeout': 300})["content"]
