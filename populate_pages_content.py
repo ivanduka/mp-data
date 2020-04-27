@@ -42,17 +42,21 @@ os.environ["TIKA_SERVER_ENDPOINT"] = "http://127.0.0.1:9998"
 tmp_folder = Path.cwd().joinpath("tmp")
 
 
-# def clear_db():
-#     stmt1 = "DELETE FROM pages_normal_txt;"
-#     stmt2 = "DELETE FROM pages_normal_xml;"
-#     stmt3 = "DELETE FROM pages_rotated90_txt;"
-#     stmt4 = "DELETE FROM pages_rotated90_xml;"
-#     with engine.connect() as conn:
-#         conn.execute(stmt1)
-#         conn.execute(stmt2)
-#         conn.execute(stmt3)
-#         conn.execute(stmt4)
-#     print("DB is cleared")
+def clear_db():
+    stmt1 = "DELETE FROM pages_normal_txt;"
+    stmt2 = "DELETE FROM pages_normal_xml;"
+    stmt3 = "DELETE FROM pages_rotated90_txt;"
+    stmt4 = "DELETE FROM pages_rotated90_xml;"
+    stmt5 = "DELETE FROM pages_rotated270_txt;"
+    stmt6 = "DELETE FROM pages_rotated270_xml;"
+    with engine.connect() as conn:
+        conn.execute(stmt1)
+        conn.execute(stmt2)
+        conn.execute(stmt3)
+        conn.execute(stmt4)
+        conn.execute(stmt5)
+        conn.execute(stmt6)
+    print("DB is cleared")
 
 
 def clean_tmp():
@@ -99,7 +103,7 @@ def insert_contents():
     while True:
         try:
             clean_tmp()
-            with Pool(96) as pool:
+            with Pool() as pool:
                 pool.map(insert_content, data, chunksize=1)
         except Exception as e:
             print("\n===========================================================\n")
@@ -116,61 +120,45 @@ def insert_contents():
 
 
 def insert_content(row):
-    # start_time = time.time()
-
     pdf_id, total_pages = row["pdfId"], int(row["totalPages"])
-    # process_pdf(pdf_id, total_pages, True, True)
-    # process_pdf(pdf_id, total_pages, False, True)
-    process_pdf(pdf_id, total_pages, True, False)
-    process_pdf(pdf_id, total_pages, False, False)
 
-    # sec = round(time.time() - start_time)
-    # print(f"Done {total_pages}x4 in {sec} seconds ({round(sec / 60, 2)} min or {round(sec / 3600, 2)} hours)")
+    def process_pdf(pdf_folder, table_name, xml):
+        # print(f"Starting {pdf_id}")
+        pdf = pdf_folder.joinpath(f"{pdf_id}.pdf")
+        if not pdf.exists():
+            raise Exception(f"{pdf} does not exist! :(")
+        with pdf.open(mode="rb") as infile, engine.connect() as conn:
+            reader = PyPDF2.PdfFileReader(infile)
+            if reader.isEncrypted:
+                reader.decrypt("")
+            for p in range(1, total_pages + 1):
+                check = f"SELECT pdfId FROM {table_name} WHERE pdfId = %s AND page_num = %s;"
+                result = conn.execute(check, (pdf_id, p))
+                if result.rowcount > 0:
+                    continue
+                # print(f"Working through {pdf_id} - page {p}")
+                writer = PyPDF2.PdfFileWriter()
+                writer.addPage(reader.getPage(p - 1))  # Reads from 0 page
+                random_file = tmp_folder.joinpath(f"{os.urandom(24).hex()}.pdf")
+                with random_file.open(mode="wb") as outfile:
+                    writer.write(outfile)
+                content = parser.from_file(outfile.name, xmlContent=xml, requestOptions={'timeout': 300})["content"]
+                if content is None:
+                    content = ""
+                cleaned_content = clean_text(content)
+                random_file.unlink()
 
+                stmt = f"INSERT INTO {table_name} (pdfId, page_num, content, clean_content) VALUES (%s,%s,%s,%s);"
+                result = conn.execute(stmt, (pdf_id, p, content, cleaned_content))
+                if result.rowcount != 1:
+                    raise Exception(f"{pdf_id}-{p}: ERROR! Updated {result.rowcount} rows!")
 
-def process_pdf(pdf_id, pages, xml, normal):
-    # print(f"Starting {pdf_id}")
-    pdf = pdf_files_folder_normal.joinpath(f"{pdf_id}.pdf")
-    if not normal:
-        pdf = pdf_files_folder_rotated90.joinpath(f"{pdf_id}.pdf")
-    if not pdf.exists():
-        raise Exception(f"{pdf} does not exist! :(")
-    with pdf.open(mode="rb") as infile, engine.connect() as conn:
-        reader = PyPDF2.PdfFileReader(infile)
-        if reader.isEncrypted:
-            reader.decrypt("")
-        for p in range(1, pages + 1):
-            # if normal and xml:
-            #     check = "SELECT pdfId FROM pages_normal_xml WHERE pdfId = %s AND page_num = %s;"
-            #     stmt = "INSERT INTO pages_normal_xml (pdfId, page_num, content) VALUES (%s,%s,%s);"
-            # if normal and not xml:
-            #     check = "SELECT pdfId FROM pages_normal_txt WHERE pdfId = %s AND page_num = %s;"
-            #     stmt = "INSERT INTO pages_normal_txt (pdfId, page_num, content) VALUES (%s,%s,%s);"
-            if not normal and xml:
-                check = "SELECT pdfId FROM pages_rotated90_xml WHERE pdfId = %s AND page_num = %s;"
-                stmt = "INSERT INTO pages_rotated90_xml (pdfId, page_num, content) VALUES (%s,%s,%s);"
-            if not normal and not xml:
-                check = "SELECT pdfId FROM pages_rotated90_txt WHERE pdfId = %s AND page_num = %s;"
-                stmt = "INSERT INTO pages_rotated90_txt (pdfId, page_num, content) VALUES (%s,%s,%s);"
-
-            result = conn.execute(check, (pdf_id, p))
-            if result.rowcount > 0:
-                continue
-
-            writer = PyPDF2.PdfFileWriter()
-            writer.addPage(reader.getPage(p - 1))  # Reads from 0 page
-            random_file = tmp_folder.joinpath(f"{os.urandom(24).hex()}.pdf")
-            with random_file.open(mode="wb") as outfile:
-                writer.write(outfile)
-            content = parser.from_file(outfile.name, xmlContent=xml, requestOptions={'timeout': 300})["content"]
-            if content is None:
-                content = ""
-            random_file.unlink()
-
-            params = (pdf_id, p, content)
-            result = conn.execute(stmt, params)
-            if result.rowcount != 1:
-                raise Exception(f"{pdf_id}-{p}: ERROR! Updated {result.rowcount} rows!")
+    # process_pdf(pdf_files_folder_normal, "pages_normal_xml", xml=True)
+    process_pdf(pdf_files_folder_normal, "pages_normal_txt", xml=False)
+    # process_pdf(pdf_files_folder_rotated90, "pages_rotated90_xml", xml=True)
+    # process_pdf(pdf_files_folder_rotated90, "pages_rotated90_txt", xml=False)
+    # process_pdf(pdf_folder=pdf_files_folder_rotated270, table_name="pages_rotated270_xml", xml=True)
+    # process_pdf(pdf_folder=pdf_files_folder_rotated270, table_name="pages_rotated270_txt", xml=False)
 
 
 def clean_text(txt):
@@ -179,16 +167,16 @@ def clean_text(txt):
     return result.strip()
 
 
-def insert_clean_content():
+def insert_clean_content(table):
     t = time.time()
 
-    stmt = text("SELECT pdfId, page_num, content FROM pages_rotated90_txt;")
+    stmt = text(f"SELECT pdfId, page_num, content FROM {table} WHERE clean_content IS NULL;")
     with engine.connect() as conn:
         df = pd.read_sql(stmt, conn)
         data = df.to_dict("records")
         for item in data:
             cleaned_text = clean_text(item["content"])
-            query = "UPDATE pages_rotated90_txt SET clean_content = %s WHERE pdfId = %s AND page_num = %s"
+            query = f"UPDATE {table} SET clean_content = %s WHERE pdfId = %s AND page_num = %s"
             result = conn.execute(query, (cleaned_text, item["pdfId"], item["page_num"]))
             if result.rowcount != 1:
                 raise Exception(f"{item}: updated {result.rowcount} rows")
@@ -233,7 +221,6 @@ def rotate_pdfs():
 
 if __name__ == "__main__":
     # clear_db()  # Careful! Removes all data!
-    # insert_contents()
-    insert_clean_content()
+    insert_contents()
+    # insert_clean_content("pages_normal_txt")
     # rotate_pdfs()
-    # insert_contents()
