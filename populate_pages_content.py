@@ -10,6 +10,7 @@ import time
 from multiprocessing import Pool
 import traceback
 import re
+from bs4 import BeautifulSoup
 
 pdf_files_folder_normal = Path("//luxor/data/branch/Environmental Baseline Data/Version 4 - Final/PDF")
 pdf_files_folder_rotated90 = Path("//luxor/data/branch/Environmental Baseline Data/Version 4 - Final/PDF_rotated90")
@@ -145,7 +146,9 @@ def insert_content(row):
                 content = parser.from_file(outfile.name, xmlContent=xml, requestOptions={'timeout': 300})["content"]
                 if content is None:
                     content = ""
+                content = content.strip()
                 cleaned_content = clean_text(content)
+
                 random_file.unlink()
 
                 stmt = f"INSERT INTO {table_name} (pdfId, page_num, content, clean_content) VALUES (%s,%s,%s,%s);"
@@ -154,11 +157,11 @@ def insert_content(row):
                     raise Exception(f"{pdf_id}-{p}: ERROR! Updated {result.rowcount} rows!")
 
     # process_pdf(pdf_files_folder_normal, "pages_normal_xml", xml=True)
-    process_pdf(pdf_files_folder_normal, "pages_normal_txt", xml=False)
+    # process_pdf(pdf_files_folder_normal, "pages_normal_txt", xml=False)
     # process_pdf(pdf_files_folder_rotated90, "pages_rotated90_xml", xml=True)
     # process_pdf(pdf_files_folder_rotated90, "pages_rotated90_txt", xml=False)
-    # process_pdf(pdf_folder=pdf_files_folder_rotated270, table_name="pages_rotated270_xml", xml=True)
-    # process_pdf(pdf_folder=pdf_files_folder_rotated270, table_name="pages_rotated270_txt", xml=False)
+    process_pdf(pdf_folder=pdf_files_folder_rotated270, table_name="pages_rotated270_xml", xml=True)
+    process_pdf(pdf_folder=pdf_files_folder_rotated270, table_name="pages_rotated270_txt", xml=False)
 
 
 def clean_text(txt):
@@ -217,6 +220,17 @@ def rotate_pdfs():
 
     sec = round(time.time() - t)
     print(f"Done {len(pdfs)} in {sec} seconds ({round(sec / 60, 2)} min or {round(sec / 3600, 2)} hours)")
+
+
+def clean_xml(xml_string):
+    soup = BeautifulSoup(xml_string, features="lxml")
+    page = soup.find('div', class_="page")
+    for tag in page.find_all():
+        if len(tag.get_text(strip=True)) == 0:  # removing empty tags like <p></p> or <p />
+            tag.extract()
+        tag.string = tag.get_text(strip=True)  # trimming whitespace in the beginning/end
+    output = "".join(str(child) for child in page.findChildren(recursive=False))
+    return output
 
 
 if __name__ == "__main__":
