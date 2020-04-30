@@ -1,25 +1,9 @@
 import json
 
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from bs4 import BeautifulSoup
-from urllib.parse import quote
-import re
-import camelot
-import PyPDF2
-from pathlib import Path
-import shutil
-import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import text, create_engine
-from wand.image import Image
-from multiprocessing import Pool
 import os
 import pandas as pd
-import importlib
-import time
-import tika
-from tika import parser
 
 load_dotenv(override=True)
 host = os.getenv("DB_HOST")
